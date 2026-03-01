@@ -1,13 +1,12 @@
 import os
 import random
 import time
-import json # NEU: Für den Vault
+import json
 from uuid import uuid4
 from nicegui import ui, app as nicegui_app
-from core.modules.models import ModuleManifest
+from core.components.plugins.logic.models import ModuleManifest
 from ui.layout import main_layout 
 from ui.theme import UIStyles
-
 # ==========================================
 # 1. MANIFEST
 # ==========================================
@@ -20,7 +19,7 @@ manifest = ModuleManifest(
     icon="grid_on",
     type="PLUGIN",
     ui_route="/bingo",
-    permissions={"subscribe": [], "emit": []}
+    permissions={"subscribe": ["vault:ready_for_data"], "emit": []} # FIX: Rechte hinzugefügt
 )
 
 # ==========================================
@@ -29,7 +28,7 @@ manifest = ModuleManifest(
 plugin_state = {
     "sessions": {}, 
     "scoreboard_enabled": False,
-    "scoreboard": {}, # NEU: Speichert { "Nickname": Siege }
+    "scoreboard": {},
     "lobby_last_update": time.time()
 }
 
@@ -89,31 +88,7 @@ def render_settings_ui(ctx):
 # 5. SETUP & MAIN UI
 # ==========================================
 def setup(ctx):
-    ctx.log.info("Lade Meeting Bingo Plugin...")
-
-    # Einstellungen laden
-    sb_enabled = ctx.get_secret("scoreboard_enabled")
-    if sb_enabled == "True":
-        plugin_state["scoreboard_enabled"] = True
-
-    # Scoreboard-Daten aus dem Vault laden
-    stored_scoreboard = ctx.get_secret("bingo_scoreboard")
-    if stored_scoreboard:
-        try:
-            plugin_state["scoreboard"] = json.loads(stored_scoreboard)
-        except Exception as e:
-            ctx.log.error(f"Fehler beim Parsen des Scoreboards aus Vault: {e}")
-            plugin_state["scoreboard"] = {}
-    else:
-        plugin_state["scoreboard"] = {}
-
-    # Hilfsfunktion zum Speichern im Vault
-    def save_scoreboard_to_vault():
-        try:
-            ctx.set_secret("bingo_scoreboard", json.dumps(plugin_state["scoreboard"]))
-            ctx.log.debug("Scoreboard erfolgreich im Vault gesichert.")
-        except Exception as e:
-            ctx.log.error(f"Vault Save Error (Scoreboard): {e}")
+    ctx.log.info("STARTUP: Loading Meeting Bingo Plugin...")
 
     # Standard-Begriffe Datei anlegen
     terms_file = os.path.join(os.path.dirname(__file__), "terms.txt")
@@ -122,9 +97,35 @@ def setup(ctx):
         with open(terms_file, "w", encoding="utf-8") as f:
             f.write("\n".join(DEFAULT_TERMS))
 
+    # --- FIX: AUF DEN VAULT WARTEN ---
+    @ctx.subscribe('vault:ready_for_data')
+    async def load_data_from_vault(payload=None):
+        ctx.log.info("LOAD: Vault ready. Fetching Bingo data...")
+        
+        sb_enabled = ctx.get_secret("scoreboard_enabled")
+        if sb_enabled == "True":
+            plugin_state["scoreboard_enabled"] = True
+
+        stored_scoreboard = ctx.get_secret("bingo_scoreboard")
+        if stored_scoreboard:
+            try:
+                plugin_state["scoreboard"] = json.loads(stored_scoreboard)
+                ctx.log.info(f"SUCCESS: Loaded {len(plugin_state['scoreboard'])} players from scoreboard.")
+            except Exception as e:
+                ctx.log.error(f"ERROR: Failed to parse scoreboard: {e}")
+                plugin_state["scoreboard"] = {}
+
+    def save_scoreboard_to_vault():
+        try:
+            ctx.set_secret("bingo_scoreboard", json.dumps(plugin_state["scoreboard"]))
+        except Exception as e:
+            ctx.log.error(f"ERROR: Vault Save Error (Scoreboard): {e}")
+
     @ui.page('/bingo')
     @main_layout('Meeting Bingo')
     async def bingo_page():
+        ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>')
+        
         local_state = {"session_id": None, "nickname": None}
         
         with open(terms_file, "r", encoding="utf-8") as f:
@@ -170,7 +171,7 @@ def setup(ctx):
                                 "players": {},
                                 "last_update": time.time()
                             }
-                            plugin_state["lobby_last_update"] = time.time() # Signal an alle Lobbys!
+                            plugin_state["lobby_last_update"] = time.time()
                             ui.notify(f'Session {s_name.value} erstellt!', type='positive')
 
                         ui.button('Session erstellen', on_click=create_session, color='primary').classes('w-full').props('unelevated rounded')
@@ -183,7 +184,7 @@ def setup(ctx):
                         p_nick = ui.input('Dein Nickname', value=default_nick).props('outlined dense').classes('w-full mb-4')
                         
                         session_list = ui.column().classes('w-full gap-2')
-                        local_lobby_time = [0] # Tracking für Live-Updates in der Lobby
+                        local_lobby_time = [0]
 
                         def join_session(sid):
                             if not p_nick.value:
@@ -197,16 +198,14 @@ def setup(ctx):
                                 board = [{'word': w, 'marked': False} for w in sample]
                                 sess["players"][nick] = {"board": board, "won": False}
                                 sess["last_update"] = time.time()
-                                plugin_state["lobby_last_update"] = time.time() # Spieler-Zähler in Lobby updaten
+                                plugin_state["lobby_last_update"] = time.time()
 
                             local_state["session_id"] = sid
                             local_state["nickname"] = nick
                             render_game()
 
                         def update_lobby_live():
-                            # Stoppe Updates, wenn wir im Game sind
                             if local_state["session_id"] is not None: return 
-                            # Nur updaten, wenn es neue globale Lobby-Events gibt
                             if plugin_state["lobby_last_update"] <= local_lobby_time[0]: return
                             
                             local_lobby_time[0] = plugin_state["lobby_last_update"]
@@ -221,12 +220,10 @@ def setup(ctx):
                                             ui.label(f'{len(sess["players"])} Spieler | {sess["size"]}x{sess["size"]}').classes('text-xs opacity-50')
                                         ui.button('Beitreten', on_click=lambda s=sid: join_session(s), color='emerald').props('unelevated rounded size=sm')
 
-                        # Polling für die Lobby starten
                         ui.timer(1.0, update_lobby_live)
-                        # Initiale Auslösung (Trick: Time auf 0 setzen, damit es auf jeden Fall rendert)
                         plugin_state["lobby_last_update"] = time.time()
 
-                # --- SCOREBOARD ANSICHT (WALL OF SHAME) ---
+                # --- SCOREBOARD ---
                 if plugin_state["scoreboard_enabled"]:
                     with ui.row().classes('w-full mt-6'):
                         with ui.card().classes(UIStyles.CARD_GLASS + ' w-full'):
@@ -235,20 +232,15 @@ def setup(ctx):
                             if not plugin_state["scoreboard"]:
                                 ui.label('Noch keine Gewinner erfasst. Zeit für das nächste Meeting!').classes('text-zinc-500 italic')
                             else:
-                                # Sortiere absteigend nach Siegen
                                 sorted_scores = sorted(plugin_state["scoreboard"].items(), key=lambda item: item[1], reverse=True)
                                 
                                 with ui.column().classes('w-full gap-0 rounded-xl overflow-hidden border border-slate-200 dark:border-zinc-700'):
-                                    for rank, (player, wins) in enumerate(sorted_scores[:10]): # Zeige Top 10
-                                        
-                                        # NEU: Hintergrund und Textfarbe dynamisch anpassen
+                                    for rank, (player, wins) in enumerate(sorted_scores[:10]):
                                         if rank == 0:
-                                            # Platz 1: Grüner Hintergrund, weißer Text
                                             bg = 'bg-emerald-500 dark:bg-emerald-600'
                                             text_color = 'text-white'
-                                            win_color = 'text-emerald-100' # Leicht helleres Grün/Weiß für die Punktzahl
+                                            win_color = 'text-emerald-100'
                                         else:
-                                            # Andere Plätze: Abwechselndes Grau
                                             bg = 'bg-white dark:bg-zinc-800' if rank % 2 == 0 else 'bg-slate-50 dark:bg-zinc-900/50'
                                             text_color = 'text-slate-800 dark:text-zinc-200'
                                             win_color = 'text-slate-500 dark:text-zinc-400'
@@ -258,7 +250,6 @@ def setup(ctx):
                                         with ui.row().classes(f'w-full justify-between items-center p-3 {bg}'):
                                             ui.label(f'{medal} {player}').classes(f'font-bold {text_color}')
                                             ui.label(f'{wins} Siege').classes(f'font-mono {win_color}')
-
 
         def render_game():
             main_container.clear()
@@ -301,35 +292,35 @@ def setup(ctx):
                                     ).on('click', lambda i=idx: mark_cell(i)):
                                         ui.label(cell['word']).classes('text-xs md:text-sm font-bold text-center leading-snug line-clamp-4')
                                     
-                                    def mark_cell(i):
-                                        if sess["players"][nick]["won"]: return 
-                                        sess["players"][nick]["board"][i]['marked'] = not sess["players"][nick]["board"][i]['marked']
-                                        
-                                        if check_win(sess["players"][nick]["board"], size):
-                                            sess["players"][nick]["won"] = True
-                                            if nick not in sess["winners"]:
-                                                sess["winners"].append(nick)
-                                                if len(sess["winners"]) == 1:
-                                                    ui.notify('BINGO! 🎉 Du hast das Meeting überlebt!', type='positive', position='center', progress=True)
-                                                    ui.run_javascript('confetti({particleCount: 150, spread: 100, origin: { y: 0.6 }});')
-                                                    
-                                                    # --- SCOREBOARD UPDATE LOGIK ---
-                                                    if plugin_state["scoreboard_enabled"]:
-                                                        if nick not in plugin_state["scoreboard"]:
-                                                            plugin_state["scoreboard"][nick] = 0
-                                                        plugin_state["scoreboard"][nick] += 1
-                                                        save_scoreboard_to_vault()
-                                                        
-                                                else:
-                                                    msg = random.choice(SARCASTIC_MESSAGES)
-                                                    ui.notify(msg, type='warning', position='center')
-                                                    
-                                        sess["last_update"] = time.time()
-                                        draw_board() 
-                                        
+                            def mark_cell(i):
+                                if sess["players"][nick]["won"]: return 
+                                sess["players"][nick]["board"][i]['marked'] = not sess["players"][nick]["board"][i]['marked']
+                                
+                                if check_win(sess["players"][nick]["board"], size):
+                                    sess["players"][nick]["won"] = True
+                                    if nick not in sess["winners"]:
+                                        sess["winners"].append(nick)
+                                        if len(sess["winners"]) == 1:
+                                            ui.notify('BINGO! 🎉 Du hast das Meeting überlebt!', type='positive', position='center', progress=True)
+                                            ui.run_javascript('confetti({particleCount: 150, spread: 100, origin: { y: 0.6 }});')
+                                            
+                                            # SCOREBOARD UPDATE
+                                            if plugin_state["scoreboard_enabled"]:
+                                                if nick not in plugin_state["scoreboard"]:
+                                                    plugin_state["scoreboard"][nick] = 0
+                                                plugin_state["scoreboard"][nick] += 1
+                                                save_scoreboard_to_vault()
+                                                
+                                        else:
+                                            msg = random.choice(SARCASTIC_MESSAGES)
+                                            ui.notify(msg, type='warning', position='center')
+                                            
+                                sess["last_update"] = time.time()
+                                draw_board() 
+                                
                         draw_board()
 
-                    # --- ANDERE SPIELER (Echtzeit + Vorschau) ---
+                    # --- ANDERE SPIELER ---
                     with ui.card().classes(UIStyles.CARD_GLASS + ' w-full lg:w-1/3 min-h-[300px]'):
                         ui.label('Andere Spieler').classes('text-lg font-bold mb-4')
                         players_container = ui.column().classes('w-full gap-4')
@@ -363,17 +354,14 @@ def setup(ctx):
                                             else:
                                                 ui.spinner('dots', size='1em').classes('opacity-30')
 
-                                        # --- MINI BOARD (Mit Wörtern!) ---
                                         with ui.grid(columns=size).classes('w-full gap-1'):
                                             for cell in p_data["board"]:
                                                 bg = '!bg-indigo-500 !text-white border-indigo-400' if cell['marked'] else '!bg-slate-200 dark:!bg-zinc-800 !text-slate-600 dark:!text-zinc-500 border-slate-300 dark:border-zinc-700'
-                                                
                                                 with ui.card().classes(f'w-full aspect-square p-1 flex items-center justify-center shadow-none border {bg}'):
                                                     ui.label(cell['word']).classes('text-[8px] md:text-[10px] leading-tight text-center line-clamp-3')
 
                         ui.timer(1.0, update_others)
                         update_others() 
-                        
-            ui.add_head_html('<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>')
 
         render_lobby()
+        
