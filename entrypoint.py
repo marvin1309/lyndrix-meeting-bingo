@@ -79,13 +79,17 @@ def render_settings_ui(ctx):
         ui.notify("Bingo Settings gespeichert.", type="positive")
 
     with ui.column().classes('w-full gap-4 pt-2'):
-        ui.label('Ethik-Einstellungen').classes('text-sm text-slate-500')
-        with ui.row().classes('w-full items-center gap-4'):
-            ui.switch('Scoreboard aktivieren (Erfasst Gewinner permanent)').bind_value(current_state, 'scoreboard_enabled').props('color=primary')
-        ui.label('Tipp: Je weniger Beweise, desto besser für den Ethikcodex!').classes('text-xs text-orange-500 italic')
-        
-        with ui.row().classes('w-full justify-end mt-2'):
-            ui.button('Speichern', on_click=apply_save, icon='save', color='primary').props('unelevated rounded size=sm')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
+            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-emerald-400 via-teal-400 to-green-400')
+            with ui.column().classes('w-full flex-grow p-5 gap-4'):
+                with ui.row().classes('items-center gap-2 mb-1'):
+                    ui.icon('grid_on', size='18px').classes('text-emerald-400')
+                    ui.label('Ethik-Einstellungen').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                with ui.row().classes('w-full items-center gap-4'):
+                    ui.switch('Scoreboard aktivieren (Erfasst Gewinner permanent)').bind_value(current_state, 'scoreboard_enabled').props('color=primary')
+                ui.label('Tipp: Je weniger Beweise, desto besser für den Ethikcodex!').classes('text-xs text-orange-500 italic')
+                with ui.row().classes('w-full justify-end mt-2'):
+                    ui.button('Speichern', on_click=apply_save, icon='save', color='primary').props('unelevated rounded size=sm')
 
 # ==========================================
 # 5. SETUP & MAIN UI
@@ -145,92 +149,100 @@ def setup(ctx):
                 with ui.row().classes('w-full gap-6 flex-col md:flex-row items-stretch'):
                     
                     # --- SESSION ERSTELLEN ---
-                    with ui.card().classes(UIStyles.CARD_GLASS + ' flex-1'):
-                        ui.label('Neue Session starten').classes('text-lg font-bold mb-4 text-primary')
-                        
-                        s_name = ui.input('Session Name').props('outlined dense').classes('w-full mb-4')
-                        s_size = ui.slider(min=3, max=5, value=3).props('label-always')
-                        ui.label('Feldgröße (3x3 bis 5x5)').classes('text-xs text-zinc-500 mb-4')
-                        
-                        s_terms = ui.textarea('Bingo Begriffe (Eine Zeile pro Begriff)').props('outlined').classes('w-full mb-4')
-                        s_terms.value = "\n".join(file_terms)
-                        
-                        def create_session():
-                            terms = [t.strip() for t in s_terms.value.split('\n') if t.strip()]
-                            size = int(s_size.value)
-                            if len(terms) < size * size:
-                                ui.notify(f'Du brauchst mindestens {size*size} Begriffe!', type='negative')
-                                return
-                            if not s_name.value:
-                                ui.notify('Bitte einen Namen vergeben!', type='negative')
-                                return
-                            
-                            sid = str(uuid4())[:8]
-                            plugin_state["sessions"][sid] = {
-                                "name": s_name.value,
-                                "size": size,
-                                "words": terms,
-                                "winners": [],
-                                "players": {},
-                                "last_update": time.time()
-                            }
-                            plugin_state["lobby_last_update"] = time.time()
-                            ui.notify(f'Session {s_name.value} erstellt!', type='positive')
+                    with ui.card().classes(f'{UIStyles.CARD_GLASS} flex-1').style('padding: 0; flex-wrap: nowrap'):
+                        ui.element('div').classes('h-1 w-full bg-gradient-to-r from-indigo-400 via-sky-400 to-cyan-400')
+                        with ui.column().classes('w-full flex-grow p-5 gap-3'):
+                            ui.label('Neue Session starten').classes('text-lg font-bold text-indigo-400')
 
-                        ui.button('Session erstellen', on_click=create_session, color='primary').classes('w-full').props('unelevated rounded')
+                            s_name = ui.input('Session Name').props('outlined dense').classes('w-full')
+                            s_size = ui.slider(min=3, max=5, value=3).props('label-always')
+                            ui.label('Feldgröße (3x3 bis 5x5)').classes('text-xs text-zinc-500')
+
+                            s_terms = ui.textarea('Bingo Begriffe (Eine Zeile pro Begriff)').props('outlined').classes('w-full')
+                            s_terms.value = "\n".join(file_terms)
+
+                            def create_session():
+                                terms = [t.strip() for t in s_terms.value.split('\n') if t.strip()]
+                                size = int(s_size.value)
+                                if len(terms) < size * size:
+                                    ui.notify(f'Du brauchst mindestens {size*size} Begriffe!', type='negative')
+                                    return
+                                if not s_name.value:
+                                    ui.notify('Bitte einen Namen vergeben!', type='negative')
+                                    return
+
+                                sid = str(uuid4())[:8]
+                                plugin_state["sessions"][sid] = {
+                                    "name": s_name.value,
+                                    "size": size,
+                                    "words": terms,
+                                    "winners": [],
+                                    "players": {},
+                                    "last_update": time.time()
+                                }
+                                plugin_state["lobby_last_update"] = time.time()
+                                ui.notify(f'Session {s_name.value} erstellt!', type='positive')
+
+                            ui.button('Session erstellen', on_click=create_session, color='primary').classes('w-full mt-2').props('unelevated rounded')
 
                     # --- SESSION BEITRETEN ---
-                    with ui.card().classes(UIStyles.CARD_GLASS + ' flex-1'):
-                        ui.label('Aktiven Sessions beitreten').classes('text-lg font-bold mb-4 text-emerald-500')
-                        
-                        default_nick = nicegui_app.storage.user.get('username', 'Gast')
-                        p_nick = ui.input('Dein Nickname', value=default_nick).props('outlined dense').classes('w-full mb-4')
-                        
-                        session_list = ui.column().classes('w-full gap-2')
-                        local_lobby_time = [0]
+                    with ui.card().classes(f'{UIStyles.CARD_GLASS} flex-1').style('padding: 0; flex-wrap: nowrap'):
+                        ui.element('div').classes('h-1 w-full bg-gradient-to-r from-emerald-400 via-teal-400 to-green-400')
+                        with ui.column().classes('w-full flex-grow p-5 gap-3'):
+                            ui.label('Aktiven Sessions beitreten').classes('text-lg font-bold text-emerald-400')
 
-                        def join_session(sid):
-                            if not p_nick.value:
-                                return ui.notify('Nickname fehlt!', type='warning')
-                            
-                            sess = plugin_state["sessions"][sid]
-                            nick = p_nick.value
-                            
-                            if nick not in sess["players"]:
-                                sample = random.sample(sess["words"], sess["size"] * sess["size"])
-                                board = [{'word': w, 'marked': False} for w in sample]
-                                sess["players"][nick] = {"board": board, "won": False}
-                                sess["last_update"] = time.time()
-                                plugin_state["lobby_last_update"] = time.time()
+                            default_nick = nicegui_app.storage.user.get('username', 'Gast')
+                            p_nick = ui.input('Dein Nickname', value=default_nick).props('outlined dense').classes('w-full')
 
-                            local_state["session_id"] = sid
-                            local_state["nickname"] = nick
-                            render_game()
+                            session_list = ui.column().classes('w-full gap-2')
+                            local_lobby_time = [0]
 
-                        def update_lobby_live():
-                            if local_state["session_id"] is not None: return 
-                            if plugin_state["lobby_last_update"] <= local_lobby_time[0]: return
-                            
-                            local_lobby_time[0] = plugin_state["lobby_last_update"]
-                            session_list.clear()
-                            with session_list:
-                                if not plugin_state["sessions"]:
-                                    ui.label('Keine aktiven Sessions.').classes('text-zinc-500 italic')
-                                for sid, sess in plugin_state["sessions"].items():
-                                    with ui.row().classes('w-full items-center justify-between p-3 bg-slate-100 dark:bg-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-700'):
-                                        with ui.column().classes('gap-0'):
-                                            ui.label(sess["name"]).classes('font-bold text-sm')
-                                            ui.label(f'{len(sess["players"])} Spieler | {sess["size"]}x{sess["size"]}').classes('text-xs opacity-50')
-                                        ui.button('Beitreten', on_click=lambda s=sid: join_session(s), color='emerald').props('unelevated rounded size=sm')
+                            def join_session(sid):
+                                if not p_nick.value:
+                                    return ui.notify('Nickname fehlt!', type='warning')
 
-                        ui.timer(1.0, update_lobby_live)
-                        plugin_state["lobby_last_update"] = time.time()
+                                sess = plugin_state["sessions"][sid]
+                                nick = p_nick.value
+
+                                if nick not in sess["players"]:
+                                    sample = random.sample(sess["words"], sess["size"] * sess["size"])
+                                    board = [{'word': w, 'marked': False} for w in sample]
+                                    sess["players"][nick] = {"board": board, "won": False}
+                                    sess["last_update"] = time.time()
+                                    plugin_state["lobby_last_update"] = time.time()
+
+                                local_state["session_id"] = sid
+                                local_state["nickname"] = nick
+                                render_game()
+
+                            def update_lobby_live():
+                                if local_state["session_id"] is not None: return
+                                if plugin_state["lobby_last_update"] <= local_lobby_time[0]: return
+
+                                local_lobby_time[0] = plugin_state["lobby_last_update"]
+                                session_list.clear()
+                                with session_list:
+                                    if not plugin_state["sessions"]:
+                                        ui.label('Keine aktiven Sessions.').classes('text-zinc-500 italic')
+                                    for sid, sess in plugin_state["sessions"].items():
+                                        with ui.row().classes('w-full items-center justify-between p-3 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700'):
+                                            with ui.column().classes('gap-0'):
+                                                ui.label(sess["name"]).classes('font-bold text-sm')
+                                                ui.label(f'{len(sess["players"])} Spieler | {sess["size"]}x{sess["size"]}').classes('text-xs opacity-50')
+                                            ui.button('Beitreten', on_click=lambda s=sid: join_session(s), color='emerald').props('unelevated rounded size=sm')
+
+                            ui.timer(1.0, update_lobby_live)
+                            plugin_state["lobby_last_update"] = time.time()
 
                 # --- SCOREBOARD ---
                 if plugin_state["scoreboard_enabled"]:
                     with ui.row().classes('w-full mt-6'):
-                        with ui.card().classes(UIStyles.CARD_GLASS + ' w-full'):
-                            ui.label('🏆 Wall of Shame (Scoreboard)').classes('text-xl font-bold mb-4 text-amber-500 dark:text-amber-400')
+                        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
+                            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-amber-400 via-orange-400 to-yellow-500')
+                            with ui.column().classes('w-full flex-grow p-5 gap-3'):
+                                with ui.row().classes('items-center gap-2 mb-2'):
+                                    ui.icon('emoji_events', size='20px').classes('text-amber-400')
+                                    ui.label('Wall of Shame (Scoreboard)').classes('text-xl font-bold text-amber-400')
                             
                             if not plugin_state["scoreboard"]:
                                 ui.label('Noch keine Gewinner erfasst. Zeit für das nächste Meeting!').classes('text-zinc-500 italic')
@@ -324,9 +336,11 @@ def setup(ctx):
                         draw_board()
 
                     # --- ANDERE SPIELER ---
-                    with ui.card().classes(UIStyles.CARD_GLASS + ' w-full lg:w-1/3 min-h-[300px]'):
-                        ui.label('Andere Spieler').classes('text-lg font-bold mb-4')
-                        players_container = ui.column().classes('w-full gap-4')
+                    with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full lg:w-1/3 min-h-[300px]').style('padding: 0; flex-wrap: nowrap'):
+                        ui.element('div').classes('h-1 w-full bg-gradient-to-r from-violet-400 via-purple-400 to-indigo-400')
+                        with ui.column().classes('w-full flex-grow p-5 gap-3'):
+                            ui.label('Andere Spieler').classes('text-lg font-bold')
+                            players_container = ui.column().classes('w-full gap-4')
                         
                         last_seen_update = [0] 
 
