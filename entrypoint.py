@@ -4,7 +4,7 @@ import time
 import json
 from uuid import uuid4
 from nicegui import ui, app as nicegui_app
-from core.components.plugins.logic.models import ModuleManifest
+from core.api import ModuleManifest
 from ui.layout import main_layout 
 from ui.theme import UIStyles
 # ==========================================
@@ -13,11 +13,14 @@ from ui.theme import UIStyles
 manifest = ModuleManifest(
     id="lyndrix.plugin.bingo",
     name="Meeting Bingo",
-    version="1.2.0",
+    version="0.0.1",
     description="Multiplayer Bullshit-Bingo für langatmige Meetings.",
     author="Lyndrix",
     icon="grid_on",
     type="PLUGIN",
+    min_core_version="1.0.0",
+    auto_enable_on_install=False,
+    repo_url="https://github.com/marvin1309/lyndrix-meeting-bingo",
     ui_route="/bingo",
     permissions={"subscribe": ["vault:ready_for_data"], "emit": []} # FIX: Rechte hinzugefügt
 )
